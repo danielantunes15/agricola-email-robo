@@ -8,6 +8,7 @@ import imaplib
 import email 
 import pdfplumber
 from tkcalendar import DateEntry 
+from PIL import Image, ImageTk 
 
 # --- CONFIGURAÇÕES GLOBAIS ---
 IMAP_SERVER = "imap.gmail.com"
@@ -212,6 +213,16 @@ class EmailRoboGUI:
         self.save_directory = DEFAULT_SAVE_DIRECTORY
         self.last_email = self._load_last_email()
         
+        # --- Configurações do GIF ---
+        self.gif_frames = []
+        self.gif_delay = 0
+        self.gif_index = 0
+        self.gif_running = False
+        self.gif_label = None
+        # Caminho do GIF fornecido pelo usuário (usando r"" para tratar as barras)
+        self.gif_path = r"C:\Users\Daniel\OneDrive\Área de Trabalho\aplicativo_email_agricola\jobson.gif"
+        # ---------------------------
+        
         self.create_login_widgets()
 
     def setup_styles(self):
@@ -238,7 +249,11 @@ class EmailRoboGUI:
         if os.path.exists(LAST_EMAIL_FILE):
             try:
                 with open(LAST_EMAIL_FILE, 'r') as f:
-                    return f.read().strip()
+                    content = f.read().strip()
+                    # Remove o prefixo de citação se houver
+                    if content.startswith(''):
+                        return content.replace('', '')
+                    return content
             except Exception:
                 return ""
         return ""
@@ -249,6 +264,73 @@ class EmailRoboGUI:
                 f.write(email_user)
         except Exception as e:
             print(f"Erro ao salvar e-mail: {e}")
+
+    # --- Métodos de Animação do GIF ---
+    def load_gif(self):
+        """Carrega todos os frames do GIF, o tempo de delay, e REDIMENSIONA."""
+        try:
+            image = Image.open(self.gif_path)
+            self.gif_frames = []
+            
+            # TAMANHO MÉDIO DO GIF: 100x100 pixels para melhor visibilidade
+            GIF_SIZE = (100, 100)
+            
+            # Tenta iterar sobre os frames
+            try:
+                while True:
+                    # Redimensiona o frame antes de converter para PhotoImage
+                    # Image.Resampling.LANCZOS é usado para melhor qualidade no redimensionamento
+                    resized_frame = image.resize(GIF_SIZE, Image.Resampling.LANCZOS)
+                    self.gif_frames.append(ImageTk.PhotoImage(resized_frame))
+                    image.seek(len(self.gif_frames))
+            except EOFError:
+                pass # Fim da animação
+                
+            # Define o delay (usando o valor do próprio GIF, se disponível, ou um padrão)
+            self.gif_delay = image.info.get('duration', 100)
+            return True
+
+        except FileNotFoundError:
+            self.log_message(f"❌ Erro de GIF: Arquivo não encontrado em {self.gif_path}")
+            return False
+        except Exception as e:
+            self.log_message(f"❌ Erro de GIF: Erro ao carregar o GIF: {e}")
+            return False
+
+    def animate_gif(self):
+        """Atualiza o frame do GIF e agenda o próximo."""
+        if not self.gif_running or not self.gif_frames:
+            return
+
+        # Garante que o label foi criado
+        if self.gif_label:
+            # Pega o próximo frame
+            frame = self.gif_frames[self.gif_index]
+            self.gif_label.configure(image=frame)
+            self.gif_label.image = frame # Manter referência
+            
+            self.gif_index = (self.gif_index + 1) % len(self.gif_frames)
+            
+            # Agenda a próxima atualização
+            self.master.after(self.gif_delay, self.animate_gif)
+            
+    def start_gif_animation(self):
+        """Prepara e inicia a animação."""
+        if not self.gif_frames:
+             if not self.load_gif():
+                 return
+                 
+        self.gif_index = 0
+        self.gif_running = True
+        self.gif_label.pack(side='right', padx=10, pady=5) # MOSTRA o GIF no canto superior direito do log
+        self.animate_gif()
+        
+    def stop_gif_animation(self):
+        """Para a animação e esconde o GIF."""
+        self.gif_running = False
+        if self.gif_label:
+            self.gif_label.pack_forget() # ESCONDE o GIF
+    # ----------------------------------------
 
     def create_login_widgets(self):
         for widget in self.master.winfo_children():
@@ -441,8 +523,15 @@ class EmailRoboGUI:
         log_frame = tk.Frame(main_container, bg=COLORS['background'])
         log_frame.pack(fill='both', expand=True, pady=(10, 0))
 
-        tk.Label(log_frame, text="📋 Log da Operação:", font=FONT_HEADER, 
-                fg=COLORS['text'], bg=COLORS['background']).pack(anchor='w')
+        # Novo frame para o cabeçalho do log e o GIF
+        log_header_frame = tk.Frame(log_frame, bg=COLORS['background'])
+        log_header_frame.pack(fill='x', pady=(0, 5))
+
+        tk.Label(log_header_frame, text="📋 Log da Operação:", font=FONT_HEADER, 
+                fg=COLORS['text'], bg=COLORS['background']).pack(side='left', anchor='w')
+        
+        # Label para o GIF (inicialmente não empacotado/invisível)
+        self.gif_label = tk.Label(log_header_frame, bg=COLORS['background'])
         
         log_container = tk.Frame(log_frame, bg=COLORS['light'], relief='flat', bd=1,
                                highlightbackground=COLORS['light'], highlightthickness=1)
@@ -503,6 +592,7 @@ class EmailRoboGUI:
         self.update_progress(0)
         
         self.search_button.config(state=tk.DISABLED, text="Buscando...")
+        self.start_gif_animation() # CHAMA O GIF ANTES DE INICIAR A THREAD
 
         Thread(target=self.perform_search, 
                args=(search_type, search_term, data_inicio, data_fim), daemon=True).start()
@@ -522,7 +612,9 @@ class EmailRoboGUI:
         except Exception as e:
             self.log_message(f"❌ ERRO GRAVE DURANTE A BUSCA: {e}")
         finally:
+            # Garante que o botão e o GIF são atualizados na thread principal
             self.master.after(0, lambda: self.search_button.config(state=tk.NORMAL, text="🔍 Iniciar Busca Avançada"))
+            self.master.after(0, self.stop_gif_animation) # CHAMA O GIF PARA PARAR
 
     def logout_and_exit(self):
         if self.mail:
