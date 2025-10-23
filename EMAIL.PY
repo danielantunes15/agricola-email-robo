@@ -100,7 +100,7 @@ def verifica_termo_no_anexo(filepath, search_regex):
     return False
 
 def processar_busca(mail, search_type, search_term, save_directory, data_inicio_dt, data_fim_dt, log_callback, progress_callback):
-    """Função central de busca e filtragem."""
+    """Função central de busca e filtragem, agora com criação de subpasta."""
     
     search_regex = get_search_regex(search_type, search_term)
     if not search_regex:
@@ -110,6 +110,10 @@ def processar_busca(mail, search_type, search_term, save_directory, data_inicio_
 
     data_inicio_imap = data_inicio_dt.strftime("%d-%b-%Y")
     data_fim_search = (data_fim_dt + timedelta(days=1)).strftime("%d-%b-%Y") # Adiciona +1 dia (IMAP BEFORE é exclusivo)
+    
+    # NOVO: Cria a subpasta com o nome do termo de busca sanitizado
+    sanitized_term = sanitize_filename(search_term)
+    final_save_directory = os.path.join(save_directory, sanitized_term) # Define o novo diretório
     
     search_criteria = f'(SINCE {data_inicio_imap} BEFORE {data_fim_search})'
     
@@ -131,7 +135,8 @@ def processar_busca(mail, search_type, search_term, save_directory, data_inicio_
         progress_callback(100)
         return
 
-    os.makedirs(save_directory, exist_ok=True)
+    # ATUALIZADO: Cria o diretório final, que inclui a subpasta do termo de busca
+    os.makedirs(final_save_directory, exist_ok=True) 
     notas_salvas = 0
     progress_per_email = 100 / total_emails
     current_progress = 0
@@ -152,7 +157,8 @@ def processar_busca(mail, search_type, search_term, save_directory, data_inicio_
                 
                 if filename and filename.lower().endswith(".pdf"):
                     filename = sanitize_filename(filename)
-                    temp_filepath = os.path.join(save_directory, f"temp_{num.decode('utf-8')}_{filename}")
+                    # ATUALIZADO: Salva temporariamente dentro do novo subdiretório
+                    temp_filepath = os.path.join(final_save_directory, f"temp_{num.decode('utf-8')}_{filename}")
 
                     try:
                         with open(temp_filepath, "wb") as f:
@@ -161,11 +167,13 @@ def processar_busca(mail, search_type, search_term, save_directory, data_inicio_
                         resultado_verificacao = verifica_termo_no_anexo(temp_filepath, search_regex)
                         
                         if resultado_verificacao is True:
-                            final_filepath = os.path.join(save_directory, filename)
+                            # ATUALIZADO: Define o caminho final dentro do novo subdiretório
+                            final_filepath = os.path.join(final_save_directory, filename)
                             
                             if os.path.exists(final_filepath):
                                 base, ext = os.path.splitext(filename)
-                                final_filepath = os.path.join(save_directory, f"{base}_DUPLICADO{ext}")
+                                # ATUALIZADO: Define o caminho duplicado dentro do novo subdiretório
+                                final_filepath = os.path.join(final_save_directory, f"{base}_DUPLICADO{ext}")
                                 
                             os.rename(temp_filepath, final_filepath)
                             log_callback(f"  ✔ Arquivo salvo: {filename}")
@@ -181,7 +189,8 @@ def processar_busca(mail, search_type, search_term, save_directory, data_inicio_
     
     progress_callback(100)
     log_callback("-" * 40)
-    log_callback(f"✅ Busca concluída. {notas_salvas} anexos relevantes salvos em: {save_directory}")
+    # ATUALIZADO: Mostra o novo caminho completo no log
+    log_callback(f"✅ Busca concluída. {notas_salvas} anexos relevantes salvos em: {final_save_directory}")
     log_callback("-" * 40)
 
 # --------------------
